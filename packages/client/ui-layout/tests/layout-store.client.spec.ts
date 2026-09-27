@@ -4,8 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLayoutStore } from '../src/client/stores.ts'
 import type { MainPanelId } from '../src/client/service.ts'
 
-beforeEach(() => { vi.stubGlobal('innerWidth', 1920) })
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+beforeEach(() => {
+  vi.stubGlobal('innerWidth', 1920)
+  localStorage.clear()
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  localStorage.clear()
+})
 
 describe('createLayoutStore', () => {
   it('starts with the default sidebar and no right panel preference', () => {
@@ -14,6 +21,7 @@ describe('createLayoutStore', () => {
       panelInfo: { activePanelId: null },
       layoutInfo: {
         sidebar: 280,
+        sidebarWidth: 280,
         viewportWidth: 1920,
         narrowExpanded: false,
         rightbar: null,
@@ -25,15 +33,14 @@ describe('createLayoutStore', () => {
     })
   })
 
-  it('creates independent instances without browser persistence', () => {
-    const write = vi.spyOn(Storage.prototype, 'setItem')
+  it('keeps live instances independent while each restores the stored widths', () => {
     const a = createLayoutStore().create()
     const b = createLayoutStore().create()
     a.actions.setSidebar(400)
     a.actions.openRightbar(true, false)
-    expect(b.store.getSnapshot().layoutInfo.sidebar).toBe(280)
-    expect(b.store.getSnapshot().layoutInfo.rightbar).toBeNull()
-    expect(write).not.toHaveBeenCalled()
+    a.actions.setRightbar(700)
+    expect(b.store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 280, sidebarWidth: 280, rightbar: null })
+    expect(createLayoutStore().create().store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarWidth: 400, rightbar: 700 })
   })
 
   it('clamps the sidebar to 264–420px', () => {
@@ -44,13 +51,13 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().layoutInfo.sidebar).toBe(420)
   })
 
-  it('toggles the wide sidebar between closed and default width', () => {
+  it('toggles the wide sidebar between closed and its dragged width', () => {
     const { store, actions } = createLayoutStore().create()
     actions.setSidebar(400)
     actions.toggleSidebar()
-    expect(store.getSnapshot().layoutInfo.sidebar).toBe(0)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 0, sidebarWidth: 400 })
     actions.toggleSidebar()
-    expect(store.getSnapshot().layoutInfo.sidebar).toBe(280)
+    expect(store.getSnapshot().layoutInfo.sidebar).toBe(400)
   })
 
   it('keeps the sidebar preference while toggling its narrow override', () => {
@@ -74,6 +81,57 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
     actions.setViewportWidth(980)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
+  })
+})
+
+describe('remembered panel widths', () => {
+  it('restores a dragged width and clamps it to the current range', () => {
+    localStorage.setItem('dsh.layout.sidebarWidth', '9999')
+    localStorage.setItem('dsh.layout.rightbarWidth', '9999')
+    expect(createLayoutStore().create().store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 420, sidebarWidth: 420, rightbar: 1344 })
+    localStorage.setItem('dsh.layout.sidebarWidth', '1')
+    localStorage.setItem('dsh.layout.rightbarWidth', '1')
+    expect(createLayoutStore().create().store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 264, sidebarWidth: 264, rightbar: 300 })
+  })
+
+  it('opens the right panel at its remembered width instead of 45% of the frame', () => {
+    localStorage.setItem('dsh.layout.rightbarWidth', '700')
+    const { store, actions } = createLayoutStore().create()
+    expect(store.getSnapshot().layoutInfo.rightbar).toBe(700)
+    actions.openRightbar(true, false)
+    expect(store.getSnapshot().layoutInfo.rightbar).toBe(700)
+  })
+
+  it('falls back to the defaults for absent, non-positive, and corrupt values', () => {
+    for (const raw of ['0', '-5', '', 'abc', '{"width":300}']) {
+      localStorage.setItem('dsh.layout.sidebarWidth', raw)
+      localStorage.setItem('dsh.layout.rightbarWidth', raw)
+      expect(createLayoutStore().create().store.getSnapshot().layoutInfo)
+        .toMatchObject({ sidebar: 280, sidebarWidth: 280, rightbar: null })
+    }
+  })
+
+  it('keeps working when the browser denies storage reads and writes', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+    const { store, actions } = createLayoutStore().create()
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 280, sidebarWidth: 280, rightbar: null })
+    actions.setSidebar(400)
+    actions.setRightbar(500)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarWidth: 400, rightbar: 500 })
+  })
+
+  it('keeps working without browser storage', () => {
+    vi.stubGlobal('localStorage', undefined)
+    try {
+      const { store, actions } = createLayoutStore().create()
+      expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 280, sidebarWidth: 280, rightbar: null })
+      actions.setSidebar(400)
+      actions.setRightbar(500)
+      expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarWidth: 400, rightbar: 500 })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

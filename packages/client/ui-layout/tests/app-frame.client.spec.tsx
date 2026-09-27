@@ -142,6 +142,7 @@ function drag(handle: Element, fromX: number, toX: number): void {
 
 beforeEach(() => {
   originalTitle = document.title
+  localStorage.clear()
   frameWidth = 1920
   selectedSession = 's-test' as SessionId
   selectedSessionTitle = undefined
@@ -365,12 +366,12 @@ describe('AppFrame normal width concessions', () => {
     expect(tracks(frame)[0]).toBe(400)
   })
 
-  it('re-expands a wide-closed sidebar at the default width while narrow', () => {
+  it('re-expands a wide-closed sidebar at its remembered width while narrow', () => {
     const { frame, instance } = mountFrame()
-    act(() => { instance.actions.toggleSidebar() })
+    act(() => { instance.actions.setSidebar(400); instance.actions.toggleSidebar() })
     resize(980)
     act(() => { instance.actions.toggleSidebar() })
-    expect(tracks(frame)[0]).toBe(280)
+    expect(tracks(frame)[0]).toBe(400)
     expect(instance.getSnapshot().layoutInfo.sidebar).toBe(0)
   })
 })
